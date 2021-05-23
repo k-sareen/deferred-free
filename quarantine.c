@@ -22,7 +22,6 @@ static const struct ql_tls_t ql_empty_tls = {
     0
 };
 
-// static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static pthread_key_t tls_default_key = (pthread_key_t)(-1);
 static __thread struct ql_tls_t *tls_default = (struct ql_tls_t *) &ql_empty_tls;
@@ -62,12 +61,7 @@ __attribute__((constructor)) static void ql_init()
 {
     // printf("ql: init constructor\n");
     pthread_once(&key_once, key_create);
-
-    real_malloc = dlsym(RTLD_NEXT, "malloc");
     real_free = dlsym(RTLD_NEXT, "free");
-    real_calloc = dlsym(RTLD_NEXT, "calloc");
-    real_realloc = dlsym(RTLD_NEXT, "realloc");
-    // printf("ql: %p %p %p %p\n", real_malloc, real_free, real_calloc, real_realloc);
 }
 
 // We don't care about how the allocation takes place as we only care about
@@ -75,17 +69,17 @@ __attribute__((constructor)) static void ql_init()
 // one go).
 inline void *ql_malloc(size_t size)
 {
-    return real_malloc(size);
+    return malloc(size);
 }
 
 inline void *ql_calloc(size_t nmemb, size_t size)
 {
-    return real_calloc(nmemb, size);
+    return calloc(nmemb, size);
 }
 
 inline void *ql_realloc(void *ptr, size_t size)
 {
-    return real_realloc(ptr, size);
+    return realloc(ptr, size);
 }
 
 static inline struct ql_tls_t *tls_setup() {
