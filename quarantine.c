@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+#include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <malloc.h>
@@ -7,12 +9,6 @@
 #include <sys/mman.h>
 
 #include "quarantine.h"
-
-// int fd = -1;
-// void **ql = NULL;
-//
-// int ql_offset = 0;
-// size_t ql_current_size = 0;
 
 struct ql_tls_t {
     void **ql;
@@ -26,29 +22,15 @@ static const struct ql_tls_t ql_empty_tls = {
     0
 };
 
+// static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 static pthread_once_t key_once = PTHREAD_ONCE_INIT;
 static pthread_key_t tls_default_key = (pthread_key_t)(-1);
 static __thread struct ql_tls_t *tls_default = (struct ql_tls_t *) &ql_empty_tls;
 
-// pthread_mutex_t ql_lock = PTHREAD_MUTEX_INITIALIZER;
-
-// We don't care about how the allocation takes place as we only care about
-// emulating a GC's free behaviour (i.e. freeing a large number of objects in
-// one go).
-inline void *ql_malloc(size_t size)
-{
-    return malloc(size);
-}
-
-inline void *ql_calloc(size_t nmemb, size_t size)
-{
-    return calloc(nmemb, size);
-}
-
-inline void *ql_realloc(void *ptr, size_t size)
-{
-    return realloc(ptr, size);
-}
+static void *(*real_malloc)(size_t size) = NULL;
+static void (*real_free)(void* ptr) = NULL;
+static void *(*real_calloc)(size_t nmemb, size_t size) = NULL;
+static void *(*real_realloc)(void *ptr, size_t size) = NULL;
 
 // TODO: destructor not called when pthreads are not used in the main executable
 // as main() just exits and does not actually call pthread_exit. Hence this is
@@ -60,20 +42,50 @@ static void thread_done(void *ptr) {
 
     for (int i = tls->ql_offset - 1; i >= 0; i--) {
         // printf("ql: free %p %p\n", tls->ql[i], &tls);
-        free(tls->ql[i]);
+        real_free(tls->ql[i]);
     }
 
     tls->ql_offset = 0;
     tls->ql_current_size = 0;
 
     munmap(tls->ql, BUFFER_SIZE);
-    free(tls);
+    real_free(tls);
     tls = (struct ql_tls_t *) &ql_empty_tls;
 }
 
 static void key_create() {
     printf("ql: run key create\n");
     pthread_key_create(&tls_default_key, &thread_done);
+}
+
+__attribute__((constructor)) static void ql_init()
+{
+    // printf("ql: init constructor\n");
+    pthread_once(&key_once, key_create);
+
+    real_malloc = dlsym(RTLD_NEXT, "malloc");
+    real_free = dlsym(RTLD_NEXT, "free");
+    real_calloc = dlsym(RTLD_NEXT, "calloc");
+    real_realloc = dlsym(RTLD_NEXT, "realloc");
+    // printf("ql: %p %p %p %p\n", real_malloc, real_free, real_calloc, real_realloc);
+}
+
+// We don't care about how the allocation takes place as we only care about
+// emulating a GC's free behaviour (i.e. freeing a large number of objects in
+// one go).
+inline void *ql_malloc(size_t size)
+{
+    return real_malloc(size);
+}
+
+inline void *ql_calloc(size_t nmemb, size_t size)
+{
+    return real_calloc(nmemb, size);
+}
+
+inline void *ql_realloc(void *ptr, size_t size)
+{
+    return real_realloc(ptr, size);
 }
 
 static inline struct ql_tls_t *tls_setup() {
@@ -87,8 +99,6 @@ static inline struct ql_tls_t *tls_setup() {
     tls_tmp->ql = mmap(NULL, BUFFER_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
     close(fd);
 
-    pthread_once(&key_once, key_create);
-
     return tls_tmp;
 }
 
@@ -96,8 +106,6 @@ void ql_free(void *ptr)
 {
     size_t size;
     struct ql_tls_t *tls = tls_default;
-
-    // pthread_mutex_lock(&ql_lock);
 
     // initialize the quarantine list TODO: adds extra comparison for every free; try and remove it and place it elsewhere
     // printf("t%p: %p\n", pthread_self(), ptr);
@@ -123,12 +131,12 @@ void ql_free(void *ptr)
         //         tls->ql_current_size, tls->ql_offset);
         for (int i = tls->ql_offset - 1; i >= 0; i--) {
             // printf("ql: free %p %p\n", tls->ql[i], &tls);
-            free(tls->ql[i]);
+            real_free(tls->ql[i]);
         }
 
         tls->ql_offset = 0;
         tls->ql_current_size = 0;
     }
-
-    // pthread_mutex_unlock(&ql_lock);
 }
+
+void free(void *ptr) QL_ALIAS(ql_free);

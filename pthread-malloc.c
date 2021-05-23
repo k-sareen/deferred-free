@@ -4,7 +4,7 @@
 #include <string.h>
 #include "quarantine.h"
 
-#define NUM_THREADS     15
+#define NUM_THREADS     5
 
 void *print_hello(void *threadid)
 {
@@ -14,11 +14,13 @@ void *print_hello(void *threadid)
     tid = (long)threadid;
 
     for (i = 0; i < 10000; i++) {
-        str = ql_malloc(sizeof(char) * (5 + i));
+        str = malloc(sizeof(char) * (5 + i));
         sprintf(str, "h%ld%d", tid, i);
         printf("tid %ld: %s\n", tid, str);
-        ql_free(str);
+        free(str);
     }
+
+    return NULL;
 }
 
 int main(int argc, char *argv[])
