@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "quarantine.h"
+#include "ql.h"
 
 #define NUM_THREADS     5
 

@@ -4,7 +4,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 
-#include "quarantine.h"
+#include "ql.h"
 
 void print_hello(pid_t pid)
 {

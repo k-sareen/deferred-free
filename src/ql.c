@@ -130,7 +130,6 @@ void ql_free(void *ptr)
     size_t size;
 
     // initialize the quarantine list XXX: adds extra comparison for every free; try and remove it and place it elsewhere
-    printd("ql: called free %p\n", ptr);
     printd_verbose("t%p: %p\n", (void *) pthread_self(), ptr);
     if (ql == (void *) &ql_empty) {
         tls_setup();
