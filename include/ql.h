@@ -2,8 +2,6 @@
 
 // 10 OS pages worth of buffer space (5120 pointers)
 #define BUFFER_SIZE     40960
-// 10 OS pages worth of memory needs to be allocated before it bulk frees TODO: make configurable
-#define QL_SIZE         40960
 
 void *ql_malloc(size_t size);
 void ql_free(void *ptr);
