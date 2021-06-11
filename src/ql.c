@@ -1,7 +1,7 @@
 #define _GNU_SOURCE   // for RTLD_NEXT
 #include <dlfcn.h>    // for dlsym()
 #include <stdio.h>    // for printf()
-#include <stdlib.h>   // for malloc(), free(), calloc(), realloc()
+#include <stdlib.h>   // for malloc(), free(), calloc(), realloc(), getenv()
 #include <malloc.h>   // for malloc_usable_size()
 #include <pthread.h>  // for pthread_key_t, pthread_key_create(), pthread_self()
 #include <unistd.h>   // for close()
@@ -36,7 +36,8 @@ static void (*real_free)(void* ptr) = NULL;
 // not actually call pthread_exit(). Hence, we use a hack wherein this function
 // is also called in ql_fini() which is the destructor for the entire library.
 // This prevents leaking memory when the program has finished execution.
-static void ql_collect() {
+static void ql_collect()
+{
     if (ql == (void *) &ql_empty) return;
     printd("ql: run thread cleanup %p\n", &ql);
 
@@ -98,7 +99,8 @@ inline void *ql_realloc(void *ptr, size_t size)
 }
 
 // Set up the thread local storage/variables for the calling pthread.
-static inline void tls_setup() {
+static inline void tls_setup()
+{
     printd("ql: run thread setup %p\n", &ql);
 
     // Use /dev/zero to get already zeroed memory when mmap'd XXX: non-portable
