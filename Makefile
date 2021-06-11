@@ -8,15 +8,15 @@ SRCDIR=./src
 TESTDIR=./test
 ODIR=./out
 
-all: quarantine-shared pthread-malloc fork-malloc
+all: ql-shared pthread-malloc fork-malloc
 .PHONY: all
 
-quarantine-shared: $(SRCDIR)/quarantine.c | $(ODIR)/
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(QL_CFLAGS) -o ${ODIR}/quarantine.so $< $(QL_LIBS)
-.PHONY: quarantine-shared
+ql-shared: $(SRCDIR)/ql.c | $(ODIR)/
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(QL_CFLAGS) -o ${ODIR}/libql.so $< $(QL_LIBS)
+.PHONY: ql-shared
 
 pthread-malloc: $(TESTDIR)/pthread-malloc.c | $(ODIR)/
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(LIBFLAGS) -o ${ODIR}/$@ $< -pthread -l:quarantine.so -Wl,-rpath=`pwd`/$(ODIR)
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(LIBFLAGS) -o ${ODIR}/$@ $< -pthread -lql -Wl,-rpath=`pwd`/$(ODIR)
 .PHONY: pthread-malloc
 
 fork-malloc: $(TESTDIR)/fork-malloc.c | $(ODIR)/
@@ -27,6 +27,6 @@ $(ODIR)/:
 	mkdir -p $(ODIR)
 
 clean:
-	rm -rf ${ODIR}/quarantine.so ${ODIR}/pthread-malloc ${ODIR}/fork-malloc
+	rm -rf ${ODIR}/libql.so ${ODIR}/pthread-malloc ${ODIR}/fork-malloc
 .PHONY: clean
 
