@@ -145,6 +145,9 @@ void ql_free(void *ptr)
     printd_verbose("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
             ptr, &ql, ql_current_size, size);
 
+    // check if we have either quarantined more than the user defined volume or
+    // if we have exhausted the quarantine buffer. if yes, then walk the list a
+    // free all memory
     if (ql_current_size >= ql_size
             || ql_offset >= BUFFER_SIZE) {
         // slow path
