@@ -1,6 +1,6 @@
 #define _GNU_SOURCE   // for RTLD_NEXT
 #include <dlfcn.h>    // for dlsym()
-#include <stdio.h>    // for printf()
+#include <stdio.h>    // for printf(), fprintf()
 #include <stdlib.h>   // for malloc(), free(), calloc(), realloc(), getenv()
 #include <malloc.h>   // for malloc_usable_size()
 #include <pthread.h>  // for pthread_key_t, pthread_key_create(), pthread_self()
@@ -12,6 +12,8 @@
 
 #define DEBUG   0
 #define VERBOSE 0
+#define printd0(fmt)\
+                do { if (DEBUG) fprintf(stderr, fmt); } while (0)
 #define printd(fmt, ...) \
                 do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 #define printd_verbose(fmt, ...) \
@@ -61,7 +63,7 @@ static void ql_collect()
 // QL_SIZE.
 __attribute__((constructor)) static void ql_init()
 {
-    printf("initializing libql\n");
+    printd0("initializing libql\n");
     real_free = dlsym(RTLD_NEXT, "free");
     pthread_key_create(&tls_default_key, &ql_collect);
 
@@ -146,8 +148,8 @@ void ql_free(void *ptr)
             ptr, &ql, ql_current_size, size);
 
     // check if we have either quarantined more than the user defined volume or
-    // if we have exhausted the quarantine buffer. if yes, then walk the list a
-    // free all memory
+    // if we have exhausted the quarantine buffer. if either are true, then
+    // walk the list and free all memory
     if (ql_current_size >= ql_size
             || ql_offset >= BUFFER_SIZE) {
         // slow path
