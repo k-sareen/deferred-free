@@ -12,7 +12,7 @@
 
 #define DEBUG   0
 #define VERBOSE 0
-#define printd0(fmt)\
+#define printd0(fmt) \
                 do { if (DEBUG) fprintf(stderr, fmt); } while (0)
 #define printd(fmt, ...) \
                 do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
@@ -132,13 +132,14 @@ void ql_free(void *ptr)
     size_t size;
 
     // initialize the quarantine list XXX: adds extra comparison for every free; try and remove it and place it elsewhere
-    printd_verbose("t%p: %p\n", (void *) pthread_self(), ptr);
     if (ql == (void *) &ql_empty) {
         tls_setup();
         if (tls_default_key != (pthread_key_t)(-1)) {
             pthread_setspecific(tls_default_key, ql);
         }
     }
+
+    printd_verbose("t%p: %p\n", &ql, ptr);
 
     ql[ql_offset++] = ptr;
     size = malloc_usable_size(ptr);
@@ -151,7 +152,7 @@ void ql_free(void *ptr)
     // if we have exhausted the quarantine buffer. if either are true, then
     // walk the list and free all memory
     if (ql_current_size >= ql_size
-            || ql_offset >= BUFFER_SIZE) {
+            || ql_offset >= NUM_PTRS_IN_BUFFER) {
         // slow path
         printd_verbose("ql: ql_current_size = %ld, ql_offset = %d\n",
                 ql_current_size, ql_offset);
