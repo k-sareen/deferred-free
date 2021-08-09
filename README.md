@@ -44,9 +44,9 @@ second library:
 > LD_PRELOAD="/path/to/libql.so /path/to/libmimalloc.so" mybinary
 ```
 
-`libql` also sets the quarantine buffer size using the environment variable
-`QL_SIZE`. The default size of the buffer if this environment variable is unset
-is 40960 bytes. Changing the quarantine buffer size can be achieved by:
+`libql` also sets the quarantine buffer volume using the environment variable
+`QL_SIZE`. The default volume of the buffer if this environment variable is
+unset is 40960 bytes. Changing the quarantine buffer volume can be achieved by:
 
 ```
 > QL_SIZE=10000 LD_PRELOAD=/path/to/libql.so mybinary
