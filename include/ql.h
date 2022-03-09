@@ -1,8 +1,7 @@
 #include <stddef.h>
 
-// 10 OS pages worth of buffer space (5120 pointers)
-#define BUFFER_SIZE             40960
-#define NUM_PTRS_IN_BUFFER      BUFFER_SIZE / sizeof(void *)
+// 1 MB thread-local buffer size
+#define BUFFER_SIZE             1048576
 
 void *ql_malloc(size_t size);
 void ql_free(void *ptr);

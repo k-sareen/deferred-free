@@ -1,22 +1,23 @@
-#define _GNU_SOURCE   // for RTLD_NEXT
-#include <dlfcn.h>    // for dlsym()
-#include <stdio.h>    // for printf(), fprintf()
-#include <stdlib.h>   // for malloc(), free(), calloc(), realloc(), getenv()
-#include <malloc.h>   // for malloc_usable_size()
-#include <pthread.h>  // for pthread_key_t, pthread_key_create(), pthread_self()
-#include <unistd.h>   // for close()
-#include <fcntl.h>    // for open()
-#include <sys/mman.h> // for mmap(), munmap()
+#define _GNU_SOURCE    // for RTLD_NEXT
+#include <dlfcn.h>     // for dlsym()
+#include <stdio.h>     // for printf(), fprintf()
+#include <stdlib.h>    // for malloc(), free(), calloc(), realloc(), getenv()
+#include <malloc.h>    // for malloc_usable_size()
+#include <pthread.h>   // for pthread_key_t, pthread_key_create(), pthread_self()
+#include <stdbool.h>   // for bool type
+#include <sys/mman.h>  // for mmap(), munmap()
+#include <stdatomic.h> // for atomic types and operations
 
 #include "ql.h"
 
 #define DEBUG   0
 #define VERBOSE 0
+#define UPDATE_N_FREES  0
 #define printd0(fmt) \
                 do { if (DEBUG) fprintf(stderr, fmt); } while (0)
 #define printd(fmt, ...) \
                 do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
-#define printd_verbose(fmt, ...) \
+#define printd_v(fmt, ...) \
                 do { if (DEBUG && VERBOSE) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
 // Default quarantine list size; it can be set from the QL_SIZE environment variable
@@ -31,6 +32,14 @@ static __thread void **ql = (void *) &ql_empty;
 static __thread int ql_offset = 0;
 static __thread size_t ql_current_size = 0;
 
+atomic_size_t ql_global_size = 0;
+static __thread size_t prev_ql_global_size = 0;
+
+#ifdef UPDATE_N_FREES
+static __thread int num_frees = 0;
+static const int MAX_NUM_FREES = 16;
+#endif
+
 static void (*real_free)(void* ptr) = NULL;
 
 // The pthread destructor set with pthread_key_create() is not called when
@@ -44,7 +53,7 @@ static void ql_collect()
     printd("ql: run thread cleanup %p\n", &ql);
 
     for (int i = ql_offset - 1; i >= 0; i--) {
-        printd_verbose("ql: free %p %p\n", ql[i], &ql);
+        printd_v("ql: free %p %p\n", ql[i], &ql);
         real_free(ql[i]);
     }
 
@@ -70,7 +79,7 @@ __attribute__((constructor)) static void ql_init()
     char *ql_size_str = getenv("QL_SIZE");
     if (ql_size_str != NULL) {
         ql_size = strtoul(ql_size_str, NULL, 10);
-        ql_size = ql_size == 0 ? 40960 : ql_size;
+        ql_size = ql_size == 0 ? 1 : ql_size;
     }
 
     printd("ql: ql_size = %lu\n", ql_size);
@@ -105,13 +114,10 @@ static inline void tls_setup()
 {
     printd("ql: run thread setup %p\n", &ql);
 
-    // Use /dev/zero to get already zeroed memory when mmap'd XXX: non-portable
-    int fd = open("/dev/zero", O_RDWR);
-
     ql_offset = 0;
     ql_current_size = 0;
-    ql = mmap(NULL, BUFFER_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-    close(fd);
+    ql = mmap(NULL, BUFFER_SIZE, PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS, 0 /* fd */, 0 /* offset */);
 }
 
 // We place malloc'd memory into a quarantine list in order to artificially add
@@ -130,8 +136,11 @@ static inline void tls_setup()
 void ql_free(void *ptr)
 {
     size_t size;
+#ifdef UPDATE_N_FREES
+    num_frees++;
+#endif
 
-    // initialize the quarantine list XXX: adds extra comparison for every free; try and remove it and place it elsewhere
+    // Initialize the quarantine list XXX: adds extra comparison for every free; try and remove it and place it elsewhere
     if (ql == (void *) &ql_empty) {
         tls_setup();
         if (tls_default_key != (pthread_key_t)(-1)) {
@@ -139,31 +148,54 @@ void ql_free(void *ptr)
         }
     }
 
-    printd_verbose("t%p: %p\n", &ql, ptr);
+    printd_v("t%p: %p\n", &ql, ptr);
 
     ql[ql_offset++] = ptr;
     size = malloc_usable_size(ptr);
     ql_current_size += size;
 
-    printd_verbose("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
+#ifdef UPDATE_N_FREES
+    if (num_frees >= MAX_NUM_FREES) {
+        atomic_fetch_add(&ql_global_size, ql_current_size);
+        ql_current_size = 0;
+        num_frees = 0;
+    }
+#else
+    atomic_fetch_add(&ql_global_size, size);
+#endif
+
+    size_t current_global_size = atomic_load(&ql_global_size);
+    bool collection_required = (current_global_size / ql_size) > (prev_ql_global_size / ql_size);
+
+    printd_v("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
             ptr, &ql, ql_current_size, size);
 
-    // check if we have either quarantined more than the user defined volume or
-    // if we have exhausted the quarantine buffer. if either are true, then
-    // walk the list and free all memory
-    if (ql_current_size >= ql_size
-            || ql_offset >= NUM_PTRS_IN_BUFFER) {
+    // Check if we have quarantined more than the user defined volume. If we
+    // have, then walk the list and free all memory
+    if (collection_required) {
+#ifdef DEBUG
+        size = 0;
+#endif
+        printd("ql %p: current_global_size = %ld (%ld), prev_ql_global_size = %ld (%ld), ql_size = %ld\n",
+                &ql, current_global_size, current_global_size / ql_size,
+                prev_ql_global_size, prev_ql_global_size / ql_size, ql_size);
+
         // slow path
-        printd_verbose("ql: ql_current_size = %ld, ql_offset = %d\n",
-                ql_current_size, ql_offset);
         for (int i = ql_offset - 1; i >= 0; i--) {
-            printd_verbose("ql: free %p %p\n", ql[i], &ql);
+            printd_v("ql: free %p %p\n", ql[i], &ql);
+#ifdef DEBUG
+            size += malloc_usable_size(ql[i]);
+#endif
             real_free(ql[i]);
         }
+
+        printd("ql %p: collected %ld bytes and %d objects\n", &ql, size, ql_offset);
 
         ql_offset = 0;
         ql_current_size = 0;
     }
+
+    prev_ql_global_size = current_global_size;
 }
 
 // Overriding free() implementations. These have to declared here instead of
