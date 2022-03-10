@@ -14,9 +14,9 @@
 #define VERBOSE 0
 #define UPDATE_N_FREES  0
 #define printd0(fmt) \
-                do { if (DEBUG) fprintf(stderr, fmt); } while (0)
+                do { if (DEBUG) fprintf(stdout, fmt); } while (0)
 #define printd(fmt, ...) \
-                do { if (DEBUG) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
+                do { if (DEBUG) fprintf(stdout, fmt, __VA_ARGS__); } while (0)
 #define printd_v(fmt, ...) \
                 do { if (DEBUG && VERBOSE) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
@@ -33,9 +33,9 @@ static __thread int ql_offset = 0;
 static __thread size_t ql_current_size = 0;
 
 atomic_size_t ql_global_size = 0;
-static __thread size_t prev_ql_global_size = 0;
+static __thread size_t collection_count = 0;
 
-#ifdef UPDATE_N_FREES
+#if UPDATE_N_FREES == 1
 static __thread int num_frees = 0;
 static const int MAX_NUM_FREES = 16;
 #endif
@@ -135,8 +135,9 @@ static inline void tls_setup()
 // free() when objects are no longer required.
 void ql_free(void *ptr)
 {
-    size_t size;
-#ifdef UPDATE_N_FREES
+    size_t size, tmp;
+    size_t current_global_size = 0;
+#if UPDATE_N_FREES == 1
     num_frees++;
 #endif
 
@@ -148,24 +149,24 @@ void ql_free(void *ptr)
         }
     }
 
-    printd_v("t%p: %p\n", &ql, ptr);
+    printd("ql %p: %p\n", &ql, ptr);
 
     ql[ql_offset++] = ptr;
     size = malloc_usable_size(ptr);
     ql_current_size += size;
 
-#ifdef UPDATE_N_FREES
+#if UPDATE_N_FREES == 1
     if (num_frees >= MAX_NUM_FREES) {
-        atomic_fetch_add(&ql_global_size, ql_current_size);
+        current_global_size = atomic_fetch_add(&ql_global_size, ql_current_size);
         ql_current_size = 0;
         num_frees = 0;
     }
 #else
-    atomic_fetch_add(&ql_global_size, size);
+    tmp = atomic_fetch_add(&ql_global_size, size);
+    current_global_size = tmp + size;
 #endif
 
-    size_t current_global_size = atomic_load(&ql_global_size);
-    bool collection_required = (current_global_size / ql_size) > (prev_ql_global_size / ql_size);
+    bool collection_required = (current_global_size / ql_size) > collection_count;
 
     printd_v("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
             ptr, &ql, ql_current_size, size);
@@ -173,17 +174,17 @@ void ql_free(void *ptr)
     // Check if we have quarantined more than the user defined volume. If we
     // have, then walk the list and free all memory
     if (collection_required) {
-#ifdef DEBUG
+#if DEBUG == 1
         size = 0;
 #endif
-        printd("ql %p: current_global_size = %ld (%ld), prev_ql_global_size = %ld (%ld), ql_size = %ld\n",
+        printd("ql %p: current_global_size = %ld (%ld), collection_count = %ld, ql_size = %ld\n",
                 &ql, current_global_size, current_global_size / ql_size,
-                prev_ql_global_size, prev_ql_global_size / ql_size, ql_size);
+                collection_count, ql_size);
 
         // slow path
         for (int i = ql_offset - 1; i >= 0; i--) {
             printd_v("ql: free %p %p\n", ql[i], &ql);
-#ifdef DEBUG
+#if DEBUG == 1
             size += malloc_usable_size(ql[i]);
 #endif
             real_free(ql[i]);
@@ -193,9 +194,9 @@ void ql_free(void *ptr)
 
         ql_offset = 0;
         ql_current_size = 0;
-    }
 
-    prev_ql_global_size = current_global_size;
+        collection_count = current_global_size / ql_size;
+    }
 }
 
 // Overriding free() implementations. These have to declared here instead of
