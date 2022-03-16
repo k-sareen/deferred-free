@@ -1,7 +1,7 @@
 #include <stddef.h>
 
 // 1 MB thread-local buffer size
-#define BUFFER_SIZE             1048576
+#define BUFFER_SIZE             2097152
 
 void *ql_malloc(size_t size);
 void ql_free(void *ptr);
