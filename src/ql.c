@@ -21,7 +21,8 @@
                 do { if (DEBUG && VERBOSE) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
 // Default quarantine list size; it can be set from the QL_SIZE environment variable
-static const long ql_size = 1;
+static long ql_size = 4096;
+static int log_ql_size = 12;
 static const void *ql_empty = NULL;
 static pthread_key_t tls_default_key = (pthread_key_t)(-1);
 
@@ -77,13 +78,20 @@ __attribute__((constructor)) static void ql_init()
     real_free = dlsym(RTLD_NEXT, "free");
     pthread_key_create(&tls_default_key, &ql_collect);
 
-    // char *ql_size_str = getenv("QL_SIZE");
-    // if (ql_size_str != NULL) {
-    //     ql_size = strtoul(ql_size_str, NULL, 10);
-    //     ql_size = ql_size == 0 ? 1 : ql_size;
-    // }
+    char *ql_size_str = getenv("QL_SIZE");
+    if (ql_size_str != NULL) {
+        ql_size = strtoul(ql_size_str, NULL, 10);
+        ql_size = ql_size == 0 ? 1 : ql_size;
+    }
 
-    // printd("ql: ql_size = %lu\n", ql_size);
+    if (ql_size != 1) {
+        // See: https://stackoverflow.com/questions/3272424/compute-fast-log-base-2-ceiling/51351885#51351885
+        log_ql_size = 63 - __builtin_clzl(ql_size - 1) + 1;
+    } else {
+        log_ql_size = 0;
+    }
+
+    printd("ql: ql_size = %lu log_ql_size = %d\n", ql_size, log_ql_size);
 }
 
 // Destructor for the entire library. See comment above ql_collect() for more insight.
@@ -169,7 +177,7 @@ void ql_free(void *ptr)
     current_global_size = tmp + size;
 #endif
 
-    int cc = (current_global_size / ql_size);
+    int cc = (current_global_size >> log_ql_size);
     bool collection_required = cc > collection_count;
 
     printd_v("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
