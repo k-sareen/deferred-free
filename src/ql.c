@@ -21,7 +21,7 @@
                 do { if (DEBUG && VERBOSE) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
 // Default quarantine list size; it can be set from the QL_SIZE environment variable
-static unsigned long ql_size = 40960;
+static const long ql_size = 1;
 static const void *ql_empty = NULL;
 static pthread_key_t tls_default_key = (pthread_key_t)(-1);
 
@@ -37,7 +37,8 @@ static __thread size_t collection_count = 0;
 
 #if UPDATE_N_FREES == 1
 static __thread int num_frees = 0;
-static const int MAX_NUM_FREES = 16;
+static __thread size_t current_global_size = 0;
+static const int MAX_NUM_FREES = 128;
 #endif
 
 static void (*real_free)(void* ptr) = NULL;
@@ -76,13 +77,13 @@ __attribute__((constructor)) static void ql_init()
     real_free = dlsym(RTLD_NEXT, "free");
     pthread_key_create(&tls_default_key, &ql_collect);
 
-    char *ql_size_str = getenv("QL_SIZE");
-    if (ql_size_str != NULL) {
-        ql_size = strtoul(ql_size_str, NULL, 10);
-        ql_size = ql_size == 0 ? 1 : ql_size;
-    }
+    // char *ql_size_str = getenv("QL_SIZE");
+    // if (ql_size_str != NULL) {
+    //     ql_size = strtoul(ql_size_str, NULL, 10);
+    //     ql_size = ql_size == 0 ? 1 : ql_size;
+    // }
 
-    printd("ql: ql_size = %lu\n", ql_size);
+    // printd("ql: ql_size = %lu\n", ql_size);
 }
 
 // Destructor for the entire library. See comment above ql_collect() for more insight.
@@ -135,10 +136,12 @@ static inline void tls_setup()
 // free() when objects are no longer required.
 void ql_free(void *ptr)
 {
-    size_t size, tmp;
-    size_t current_global_size = 0;
+    size_t size;
 #if UPDATE_N_FREES == 1
     num_frees++;
+#else
+    size_t tmp;
+    size_t current_global_size = 0;
 #endif
 
     // Initialize the quarantine list XXX: adds extra comparison for every free; try and remove it and place it elsewhere
@@ -153,9 +156,9 @@ void ql_free(void *ptr)
 
     ql[ql_offset++] = ptr;
     size = malloc_usable_size(ptr);
-    ql_current_size += size;
 
 #if UPDATE_N_FREES == 1
+    ql_current_size += size;
     if (num_frees >= MAX_NUM_FREES) {
         current_global_size = atomic_fetch_add(&ql_global_size, ql_current_size);
         ql_current_size = 0;
@@ -166,7 +169,8 @@ void ql_free(void *ptr)
     current_global_size = tmp + size;
 #endif
 
-    bool collection_required = (current_global_size / ql_size) > collection_count;
+    int cc = (current_global_size / ql_size);
+    bool collection_required = cc > collection_count;
 
     printd_v("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
             ptr, &ql, ql_current_size, size);
@@ -187,15 +191,17 @@ void ql_free(void *ptr)
 #if DEBUG == 1
             size += malloc_usable_size(ql[i]);
 #endif
+            if (real_free == NULL) return;
             real_free(ql[i]);
         }
 
         printd("ql %p: collected %ld bytes and %d objects\n", &ql, size, ql_offset);
 
         ql_offset = 0;
+#if UPDATE_N_FREES == 1
         ql_current_size = 0;
-
-        collection_count = current_global_size / ql_size;
+#endif
+        collection_count = cc;
     }
 }
 
