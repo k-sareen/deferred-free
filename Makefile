@@ -1,4 +1,3 @@
-CC=gcc
 CFLAGS=-Wall -O3
 QL_CFLAGS=-shared -fPIC
 QL_LIBS=-pthread -ldl

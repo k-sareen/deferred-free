@@ -21,8 +21,8 @@
                 do { if (DEBUG && VERBOSE) fprintf(stderr, fmt, __VA_ARGS__); } while (0)
 
 // Default quarantine list size; it can be set from the QL_SIZE environment variable
-static long ql_size = 4096;
-static int log_ql_size = 12;
+long ql_size = 4096;
+int log_ql_size = 12;
 static const void *ql_empty = NULL;
 static pthread_key_t tls_default_key = (pthread_key_t)(-1);
 
@@ -54,8 +54,9 @@ static void ql_collect()
     if (ql == (void *) &ql_empty) return;
     printd("ql: run thread cleanup %p\n", &ql);
 
-    for (int i = ql_offset - 1; i >= 0; i--) {
+    for (int i = 0; i < ql_offset; i++) {
         printd_v("ql: free %p %p\n", ql[i], &ql);
+        if (real_free == NULL) return;
         real_free(ql[i]);
     }
 
@@ -144,6 +145,8 @@ static inline void tls_setup()
 // free() when objects are no longer required.
 void ql_free(void *ptr)
 {
+    if (ptr == NULL) return;
+
     size_t size;
 #if UPDATE_N_FREES == 1
     num_frees++;
@@ -177,7 +180,7 @@ void ql_free(void *ptr)
     current_global_size = tmp + size;
 #endif
 
-    int cc = (current_global_size >> log_ql_size);
+    size_t cc = (current_global_size >> log_ql_size);
     bool collection_required = cc > collection_count;
 
     printd_v("ql: add  %p %p ql_current_size = %ld, size = %ld\n",
@@ -194,7 +197,7 @@ void ql_free(void *ptr)
                 collection_count, ql_size);
 
         // slow path
-        for (int i = ql_offset - 1; i >= 0; i--) {
+        for (int i = 0; i < ql_offset; i++) {
             printd_v("ql: free %p %p\n", ql[i], &ql);
 #if DEBUG == 1
             size += malloc_usable_size(ql[i]);
